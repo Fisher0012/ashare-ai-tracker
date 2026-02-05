@@ -12,7 +12,7 @@ from src.rule_engine import (
 )
 from src.state_manager import StateManager
 from src.notification_service import NotificationService
-from src.data_provider import MockDataProvider
+from src.data_provider import MockDataProvider, AkShareDataProvider
 from src.models import MarketStatus, NotificationFormat
 
 # Page Config
@@ -114,14 +114,35 @@ st.title("A-Share AI Intraday Tracker (MVP)")
 
 # Sidebar controls
 with st.sidebar:
-    st.header("Simulation Control")
-    if st.button("Step Forward (Next Minute)"):
+    st.header("Settings")
+    
+    # Data Source Selection
+    data_source = st.radio(
+        "Data Source",
+        ["Mock (Simulation)", "Real (AkShare)"],
+        index=0
+    )
+    
+    # Handle Data Source Switch
+    if data_source == "Real (AkShare)" and isinstance(st.session_state.data_provider, MockDataProvider):
+        st.session_state.data_provider = AkShareDataProvider()
+        st.toast("Switched to Real Data Source")
+    elif data_source == "Mock (Simulation)" and not isinstance(st.session_state.data_provider, MockDataProvider):
+        st.session_state.data_provider = MockDataProvider()
+        st.toast("Switched to Mock Data Source")
+
+    st.divider()
+    st.header("Control")
+    
+    if st.button("Step Forward / Refresh"):
         update_system()
     
-    auto_run = st.checkbox("Auto Run (2s Interval)")
+    # Auto run interval depends on source
+    interval = 2 if data_source == "Mock (Simulation)" else 60
+    auto_run = st.checkbox(f"Auto Run ({interval}s Interval)")
 
 if auto_run:
-    time.sleep(2)
+    time.sleep(interval)
     update_system()
     st.rerun()
 

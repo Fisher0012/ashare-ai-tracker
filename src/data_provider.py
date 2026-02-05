@@ -65,31 +65,35 @@ class AkShareDataProvider(DataProvider):
             
     def get_latest_market_snapshot(self) -> Dict[str, Any]:
         try:
-            # 1. Get Index Spot Data (e.g., Shanghai Composite 000001)
-            # Note: Real-time API calls can be slow. In production, these should be async or cached.
+            # 1. Get Index Spot Data (Shanghai Composite - sh000001)
+            # stock_zh_index_spot returns a dataframe with all indices
+            # We filter for sh000001
+            df_index = ak.stock_zh_index_spot()
+            sh_index = df_index[df_index['代码'] == 'sh000001'].iloc[0]
             
-            # Using a fast spot interface for demo (stock_zh_a_spot_em is heavy, using index)
-            # sh_index = ak.stock_zh_index_spot_sina() # This is just an example
-            
-            # For MVP stability, we will fetch simplified data or catch errors
-            # Here we simulate the logic of mapping AkShare data to our schema
-            
-            # Real implementation would be:
-            # df_index = ak.stock_zh_index_spot() 
-            # row = df_index[df_index['代码'] == 'sh000001']
-            
-            # Mocking the mapping for now to ensure code runs if user installs akshare
-            # but API might change or network might fail.
-            
+            volume = float(sh_index['成交额']) if '成交额' in sh_index else 0
+            index_change = float(sh_index['涨跌幅']) if '涨跌幅' in sh_index else 0.0
+
+            # 2. Get Top Sector (Industry Board)
+            # stock_board_industry_name_em returns industry rankings
+            df_sector = ak.stock_board_industry_name_em()
+            top_sector_row = df_sector.iloc[0]
+            top_sector_name = top_sector_row['板块名称']
+            top_sector_change = float(top_sector_row['涨跌幅'])
+
+            # 3. North Bound Flow (Simulated/Placeholder for stability as API varies)
+            # Real-time north bound flow often requires specific interfaces
+            north_flow = 0 
+
             return {
                 "timestamp": time.time(),
-                "volume": 0, # Placeholder
-                "index_change_pct": 0.0,
-                "north_bound_flow": 0,
-                "limit_down_count": 0,
-                "bomb_rate": 0,
-                "top_sector": "Unknown",
-                "top_sector_change_pct": 0.0
+                "volume": volume,
+                "index_change_pct": index_change,
+                "north_bound_flow": north_flow,
+                "limit_down_count": 0, # Expensive to calculate in real-time
+                "bomb_rate": 0,        # Expensive to calculate in real-time
+                "top_sector": top_sector_name,
+                "top_sector_change_pct": top_sector_change
             }
         except Exception as e:
             print(f"Error fetching AkShare data: {e}")
