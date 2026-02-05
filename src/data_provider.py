@@ -28,7 +28,10 @@ class DataProvider(ABC):
         - bomb_rate
         - top_sector
         - top_sector_change_pct
-        - top_sector_constituents (List[Dict]: symbol, name, change_pct) [New]
+        - top_sector_constituents (List[Dict]: symbol, name, change_pct)
+        - dragon_tiger_list (List[Dict]: name, reason, net_buy)
+        - latest_notices (List[Dict]: title, time, url)
+        - limit_up_ladder (Dict[str, List[str]]): { "4板+": [], "3板": [], "2板": [] } [New]
         """
         pass
 
@@ -63,8 +66,33 @@ class MockDataProvider(DataProvider):
                 "symbol": f"600{random.randint(100, 999)}",
                 "change_pct": sector_change + random.uniform(0, 3)
             })
-        # Sort by change
         constituents.sort(key=lambda x: x['change_pct'], reverse=True)
+        
+        # Mock Dragon Tiger
+        dragon_list = []
+        if random.random() > 0.7:
+            dragon_list.append({
+                "name": "Mock Stock A",
+                "reason": "Day Limit Up",
+                "net_buy": 50000000
+            })
+
+        # Mock Notices
+        notices = []
+        if random.random() > 0.8:
+            notices.append({
+                "title": f"Mock Company {random.randint(1,100)} Annual Report Pre-increase",
+                "time": "10:30",
+                "url": "#"
+            })
+
+        # Mock Limit Up Ladder
+        ladder = {
+            "4板+": [f"High Stock {i}" for i in range(random.randint(0, 2))],
+            "3板": [f"Mid Stock {i}" for i in range(random.randint(0, 3))],
+            "2板": [f"Low Stock {i}" for i in range(random.randint(1, 5))],
+            "1板": [f"First Stock {i}" for i in range(random.randint(5, 10))]
+        }
 
         return {
             "timestamp": time.time(),
@@ -75,7 +103,10 @@ class MockDataProvider(DataProvider):
             "bomb_rate": max(0, min(100, 20 - self.trend * 10 + random.uniform(-5, 5))),
             "top_sector": sector_name,
             "top_sector_change_pct": sector_change,
-            "top_sector_constituents": constituents
+            "top_sector_constituents": constituents,
+            "dragon_tiger_list": dragon_list,
+            "latest_notices": notices,
+            "limit_up_ladder": ladder
         }
 
 class AkShareDataProvider(DataProvider):
@@ -97,21 +128,16 @@ class AkShareDataProvider(DataProvider):
 
             # 2. Get Top Sector (Industry Board)
             df_sector = ak.stock_board_industry_name_em()
-            # Sort by change pct to get the top one
             df_sector = df_sector.sort_values(by='涨跌幅', ascending=False)
             top_sector_row = df_sector.iloc[0]
             top_sector_name = top_sector_row['板块名称']
             top_sector_change = float(top_sector_row['涨跌幅'])
             
             # 3. Get Top Constituents for the Top Sector
-            # This is the Level 2 Drill-down
             top_sector_constituents = []
             try:
-                # stock_board_industry_cons_em(symbol="板块名称")
                 df_cons = ak.stock_board_industry_cons_em(symbol=top_sector_name)
-                # Sort by change pct
                 df_cons = df_cons.sort_values(by='涨跌幅', ascending=False)
-                # Take top 3
                 for _, row in df_cons.head(3).iterrows():
                     top_sector_constituents.append({
                         "name": row['名称'],
@@ -121,11 +147,77 @@ class AkShareDataProvider(DataProvider):
             except Exception as e:
                 print(f"Error fetching constituents for {top_sector_name}: {e}")
 
-            # 4. Limit Up Count (Optional, can be heavy)
-            # For now, we skip full limit up pool scan to keep it fast, 
-            # or we can use a summary interface if available.
+            # 4. Limit Up Count (Optional)
             limit_down_count = 0 
             bomb_rate = 0
+            
+            # 5. Dragon Tiger List (Daily)
+            # Use 'stock_lhb_jgzz_sina' for institutional seats
+            dragon_tiger_list = []
+            try:
+                # This fetches latest available LHB data
+                df_lhb = ak.stock_lhb_jgzz_sina(date=time.strftime("%Y%m%d"))
+                # Filter for Net Buy > 10M
+                if not df_lhb.empty:
+                    # Rename columns to match schema if needed, but akshare output varies
+                    # Assuming columns like '股票名称', '净买入额'
+                    for _, row in df_lhb.head(3).iterrows():
+                        net_buy = float(row.get('净买入额', 0))
+                        if net_buy > 10000000:
+                            dragon_tiger_list.append({
+                                "name": row.get('股票名称', 'Unknown'),
+                                "reason": "Institutional Net Buy",
+                                "net_buy": net_buy
+                            })
+            except:
+                pass # Fail silently for LHB as it might be empty intraday
+            
+            # 6. Notices / News
+            # stock_tease_ram(symbol="上证指数") is not ideal
+            # Use stock_info_global_cls for fast news
+            latest_notices = []
+            try:
+                # Fetch global news from Cailian Press (CLS)
+                df_news = ak.stock_info_global_cls(symbol="A股24小时电报")
+                # Filter for key words
+                keywords = ["增长", "中标", "回购", "利好", "涨停"]
+                for _, row in df_news.head(5).iterrows():
+                    content = row['content']
+                    title = row['title']
+                    if any(k in content for k in keywords) or any(k in title for k in keywords):
+                        latest_notices.append({
+                            "title": title if title else content[:30] + "...",
+                            "time": row['publish_time'],
+                            "url": "#"
+                        })
+            except:
+                pass
+
+            # 7. Limit Up Ladder (Real-time)
+            # stock_zt_pool_em(date="20240601")
+            limit_up_ladder = {"4板+": [], "3板": [], "2板": [], "1板": []}
+            try:
+                date_str = time.strftime("%Y%m%d")
+                # This API might return empty if not trading time or early morning
+                df_zt = ak.stock_zt_pool_em(date=date_str)
+                if not df_zt.empty:
+                    # Column usually: '名称', '连板数'
+                    for _, row in df_zt.iterrows():
+                        name = row['名称']
+                        lb_count = int(row['连板数'])
+                        
+                        if lb_count >= 4:
+                            limit_up_ladder["4板+"].append(f"{name}({lb_count})")
+                        elif lb_count == 3:
+                            limit_up_ladder["3板"].append(name)
+                        elif lb_count == 2:
+                            limit_up_ladder["2板"].append(name)
+                        else:
+                            # Too many 1 ban, just count or take first few
+                            if len(limit_up_ladder["1板"]) < 5:
+                                limit_up_ladder["1板"].append(name)
+            except:
+                pass # Fail silently
 
             return {
                 "timestamp": time.time(),
@@ -136,7 +228,10 @@ class AkShareDataProvider(DataProvider):
                 "bomb_rate": bomb_rate,
                 "top_sector": top_sector_name,
                 "top_sector_change_pct": top_sector_change,
-                "top_sector_constituents": top_sector_constituents
+                "top_sector_constituents": top_sector_constituents,
+                "dragon_tiger_list": dragon_tiger_list,
+                "latest_notices": latest_notices,
+                "limit_up_ladder": limit_up_ladder
             }
         except Exception as e:
             print(f"Error fetching AkShare data: {e}")
@@ -150,5 +245,8 @@ class AkShareDataProvider(DataProvider):
                 "bomb_rate": 0,
                 "top_sector": "Error",
                 "top_sector_change_pct": 0,
-                "top_sector_constituents": []
+                "top_sector_constituents": [],
+                "dragon_tiger_list": [],
+                "latest_notices": [],
+                "limit_up_ladder": {"4板+": [], "3板": [], "2板": [], "1板": []}
             }

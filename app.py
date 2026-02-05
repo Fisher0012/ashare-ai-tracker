@@ -17,42 +17,68 @@ from src.models import MarketStatus, NotificationFormat
 
 # Page Config
 st.set_page_config(
-    page_title="A-Share AI Tracker",
+    page_title="A股 AI 盘中追踪",
     page_icon="📈",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed" # Better for mobile
 )
 
-# --- CSS Styling ---
+# --- CSS Styling (Mobile Optimized) ---
 st.markdown("""
 <style>
-    .stMetric {
-        background-color: #f0f2f6;
-        padding: 10px;
-        border-radius: 5px;
+    /* Global Font */
+    body {
+        font-family: "Source Sans Pro", sans-serif;
     }
+    
+    /* Mobile-first layout adjustments */
+    .stMetric {
+        background-color: #f8f9fa;
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
     .status-card {
-        padding: 20px;
-        border-radius: 10px;
+        padding: 15px;
+        border-radius: 8px;
         text-align: center;
         color: white;
         font-weight: bold;
-        font-size: 24px;
+        font-size: 20px;
+        margin-bottom: 10px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.15);
     }
-    .status-red { background-color: #ff4b4b; }
-    .status-yellow { background-color: #ffa500; }
-    .status-green { background-color: #4caf50; }
+    .status-red { background-color: #ff4b4b; background-image: linear-gradient(135deg, #ff4b4b 0%, #ff0000 100%); }
+    .status-yellow { background-color: #ffa500; background-image: linear-gradient(135deg, #ffa500 0%, #ff8c00 100%); }
+    .status-green { background-color: #4caf50; background-image: linear-gradient(135deg, #4caf50 0%, #2e7d32 100%); }
     
     .notif-card {
         border-left: 5px solid #2196f3;
-        background-color: #f8f9fa;
-        padding: 10px;
-        margin-bottom: 10px;
-        border-radius: 5px;
+        background-color: white;
+        padding: 12px;
+        margin-bottom: 12px;
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        font-size: 14px;
     }
     .notif-alert {
         border-left: 5px solid #ff4b4b;
-        background-color: #fff0f0;
+        background-color: #fff5f5;
+        padding: 12px;
+        margin-bottom: 12px;
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        font-size: 14px;
     }
+    
+    /* Headers */
+    h1 { font-size: 1.8rem !important; margin-bottom: 1rem !important; }
+    h3 { font-size: 1.2rem !important; margin-top: 0.5rem !important; }
+    
+    /* Hide footer */
+    footer {visibility: hidden;}
+    
 </style>
 """, unsafe_allow_html=True)
 
@@ -75,9 +101,34 @@ if 'initialized' not in st.session_state:
     st.session_state.market_data_log = []
     
     st.session_state.initialized = True
+    
+    # Try to fetch Real Data first for initialization
+    init_data = None
+    try:
+        real_provider = AkShareDataProvider()
+        init_data = real_provider.get_latest_market_snapshot()
+        # Check if data is valid (not empty placeholder)
+        if init_data["volume"] == 0 and not init_data["top_sector_constituents"]:
+            init_data = None # Treat as fail if empty
+    except:
+        pass
+        
+    # Fallback to Mock if Real failed
+    if not init_data:
+        mock_provider = MockDataProvider()
+        init_data = mock_provider.get_latest_market_snapshot()
+        
+    st.session_state.history_window.append(init_data)
+    
+    st.session_state.market_data_log.append({
+        "time": time.strftime("%H:%M:%S", time.localtime(init_data["timestamp"])),
+        "index_change": init_data["index_change_pct"],
+        "volume": init_data["volume"]
+    })
 
 # --- Main Logic Function ---
 def update_system():
+    """Fetch latest data, evaluate rules, and update system state."""
     # 1. Get Data
     data = st.session_state.data_provider.get_latest_market_snapshot()
     st.session_state.history_window.append(data)
@@ -110,36 +161,36 @@ def update_system():
 
 # --- UI Layout ---
 
-st.title("A-Share AI Intraday Tracker (MVP)")
+st.title("A股 AI 盘中追踪")
 
 # Sidebar controls
 with st.sidebar:
-    st.header("Settings")
+    st.header("系统设置")
     
     # Data Source Selection
     data_source = st.radio(
-        "Data Source",
-        ["Mock (Simulation)", "Real (AkShare)"],
+        "数据源选择",
+        ["模拟数据 (Mock)", "实盘数据 (AkShare)"],
         index=0
     )
     
     # Handle Data Source Switch
-    if data_source == "Real (AkShare)" and isinstance(st.session_state.data_provider, MockDataProvider):
+    if data_source == "实盘数据 (AkShare)" and isinstance(st.session_state.data_provider, MockDataProvider):
         st.session_state.data_provider = AkShareDataProvider()
-        st.toast("Switched to Real Data Source")
-    elif data_source == "Mock (Simulation)" and not isinstance(st.session_state.data_provider, MockDataProvider):
+        st.toast("已切换至实盘数据源")
+    elif data_source == "模拟数据 (Mock)" and not isinstance(st.session_state.data_provider, MockDataProvider):
         st.session_state.data_provider = MockDataProvider()
-        st.toast("Switched to Mock Data Source")
+        st.toast("已切换至模拟数据源")
 
     st.divider()
-    st.header("Control")
+    st.header("运行控制")
     
-    if st.button("Step Forward / Refresh"):
+    if st.button("手动刷新 / 单步执行"):
         update_system()
     
     # Auto run interval depends on source
-    interval = 2 if data_source == "Mock (Simulation)" else 60
-    auto_run = st.checkbox(f"Auto Run ({interval}s Interval)")
+    interval = 2 if data_source == "模拟数据 (Mock)" else 60
+    auto_run = st.checkbox(f"自动运行 (每 {interval} 秒)")
 
 if auto_run:
     time.sleep(interval)
@@ -149,53 +200,127 @@ if auto_run:
 # Get current state
 current_state = st.session_state.state_manager.current_state
 
+# --- Dashboard Layout (Mobile Friendly) ---
+
 # Top Row: Market Status
-col1, col2, col3 = st.columns([1, 2, 1])
+col1, col2, col3 = st.columns([1, 1.5, 1])
 
 with col1:
-    st.subheader("Market Status")
+    status_map = {
+        "red": "高风险 / 过热",
+        "yellow": "震荡 / 观察",
+        "green": "积极 / 安全"
+    }
+    status_text = status_map.get(current_state.status.value, "未知")
     status_color = current_state.status.value
+    
     st.markdown(f"""
+        <div style="font-size:12px; color:gray; margin-bottom:5px;">市场状态</div>
         <div class="status-card status-{status_color}">
-            {status_color.upper()}
+            {status_text}
         </div>
     """, unsafe_allow_html=True)
 
 with col2:
-    st.subheader("Core Driver")
-    st.info(f"**{current_state.main_driver}**")
-    st.caption(current_state.summary)
+    st.metric("核心驱动因素", current_state.main_driver, help="导致当前市场状态变化的主要原因")
 
 with col3:
-    st.metric("Sentiment Score", f"{current_state.sentiment_score:.0f}", delta=None)
+    st.metric("情绪评分 (0-100)", f"{current_state.sentiment_score:.0f}")
 
 st.divider()
 
 # Middle Row: Charts & Notifications
+# On mobile, these will stack automatically
 c1, c2 = st.columns([2, 1])
 
 with c1:
-    st.subheader("Market Trend (Index %)")
+    st.subheader("大盘分时趋势")
     if st.session_state.market_data_log:
         df = pd.DataFrame(st.session_state.market_data_log)
-        st.line_chart(df.set_index("time")["index_change"])
+        # Simple line chart
+        st.line_chart(
+            df.set_index("time")["index_change"],
+            height=250,
+            use_container_width=True
+        )
     else:
-        st.info("Waiting for data...")
+        st.info("等待数据接入中...")
 
 with c2:
-    st.subheader("Live Signals")
+    st.subheader("实时信号流")
     if not st.session_state.notifications_log:
-        st.write("No signals yet.")
+        st.caption("暂无异常信号")
     
-    for notif in st.session_state.notifications_log[:5]: # Show last 5
+    for notif in st.session_state.notifications_log[:10]: # Show last 10
         css_class = "notif-alert" if notif.format == NotificationFormat.ALERT else "notif-card"
+        
+        # Translate format types for UI
+        type_map = {
+            "flash": "快讯",
+            "card": "信号",
+            "alert": "预警"
+        }
+        type_text = type_map.get(notif.format.value, "消息")
         
         with st.container():
             st.markdown(f"""
             <div class="{css_class}">
-                <strong>[{notif.format.value.upper()}] {notif.title}</strong><br>
-                <small>{time.strftime('%H:%M:%S', time.localtime(notif.timestamp))}</small>
-            </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                    <span style="font-weight:bold; color:#333;">[{type_text}] {notif.title}</span>
+                    <span style="font-size:0.8em; color:#666;">{time.strftime('%H:%M:%S', time.localtime(notif.timestamp))}</span>
+                </div>
+                <div style="font-size:0.9em; color:#444;">
             """, unsafe_allow_html=True)
+            
             for line in notif.lines:
-                st.write(f"- {line}")
+                st.markdown(f"- {line}")
+            
+            st.markdown("</div></div>", unsafe_allow_html=True)
+
+st.divider()
+
+# Bottom Row: Tabs for Ladder, LHB, Notices
+tab1, tab2, tab3 = st.tabs(["� 涨停梯队", "�� 龙虎榜", "📢 突发公告"])
+
+data_snapshot = st.session_state.history_window[-1] if st.session_state.history_window else {}
+
+with tab1:
+    ladder = data_snapshot.get("limit_up_ladder", {})
+    if ladder:
+        cols = st.columns(4)
+        with cols[0]:
+            st.markdown("##### 🏆 高标 (4板+)")
+            for stock in ladder.get("4板+", []):
+                st.markdown(f"<span style='color:red; font-weight:bold;'>{stock}</span>", unsafe_allow_html=True)
+        with cols[1]:
+            st.markdown("##### 🥈 中位 (3板)")
+            for stock in ladder.get("3板", []):
+                st.markdown(f"{stock}")
+        with cols[2]:
+            st.markdown("##### 🥉 晋级 (2板)")
+            for stock in ladder.get("2板", []):
+                st.markdown(f"{stock}")
+        with cols[3]:
+            st.markdown("##### 🌱 首板挖掘")
+            first_board = ladder.get("1板", [])
+            st.caption(f"共 {len(first_board)} 只，展示前5:")
+            for stock in first_board[:5]:
+                st.markdown(f"{stock}")
+    else:
+        st.info("暂无连板数据")
+
+with tab2:
+    lhb_list = data_snapshot.get("dragon_tiger_list", [])
+    if lhb_list:
+        for item in lhb_list:
+            st.success(f"**{item['name']}**: {item['reason']} (净买入 {item['net_buy']/10000:.0f} 万)")
+    else:
+        st.caption("暂无机构大额净买入数据")
+
+with tab3:
+    notices = data_snapshot.get("latest_notices", [])
+    if notices:
+        for note in notices:
+            st.markdown(f"**[{note['time']}]** {note['title']}")
+    else:
+        st.caption("暂无突发利好公告")
