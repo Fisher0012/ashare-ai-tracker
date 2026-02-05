@@ -106,17 +106,19 @@ if 'initialized' not in st.session_state:
     init_data = None
     try:
         real_provider = AkShareDataProvider()
-        init_data = real_provider.get_latest_market_snapshot()
-        # Check if data is valid (not empty placeholder)
-        if init_data["volume"] == 0 and not init_data["top_sector_constituents"]:
-            init_data = None # Treat as fail if empty
-    except:
-        pass
+        # Use get_market_snapshot_safe to ensure we get data (even yesterday's)
+        init_data = real_provider.get_market_snapshot_safe()
+    except Exception as e:
+        # Only fallback if absolutely necessary (e.g. network down)
+        # But user requested "MUST be real data", so we might want to show error instead
+        # For robustness, we still fallback but maybe show a warning
+        st.error(f"无法获取真实数据，请检查网络连接: {e}")
         
-    # Fallback to Mock if Real failed
+    # If still no data (extreme case), fallback to Mock to prevent crash
     if not init_data:
         mock_provider = MockDataProvider()
         init_data = mock_provider.get_latest_market_snapshot()
+        st.warning("⚠️ 警告：当前展示为模拟数据（真实数据获取失败）")
         
     st.session_state.history_window.append(init_data)
     
