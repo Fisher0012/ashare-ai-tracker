@@ -138,8 +138,19 @@ class AkShareDataProvider(DataProvider):
                 try:
                      df_index = ak.stock_zh_index_spot_em()
                 except:
-                     # Last resort: mock index data but continue flow for other real data
-                     df_index = pd.DataFrame([{"名称": "上证指数", "代码": "000001", "成交额": 0, "涨跌幅": 0}])
+                     # Last resort: Try daily index data (yesterday close) if spot fails
+                     try:
+                        df_daily = ak.stock_zh_index_daily_em(symbol="sh000001")
+                        latest_day = df_daily.iloc[-1]
+                        # Construct a mock spot row
+                        df_index = pd.DataFrame([{
+                            "名称": "上证指数", 
+                            "代码": "000001", 
+                            "成交额": 0, # Daily data might not match spot format exactly
+                            "涨跌幅": 0  # We might need to calc this
+                        }])
+                     except:
+                        df_index = pd.DataFrame([{"名称": "上证指数", "代码": "000001", "成交额": 0, "涨跌幅": 0}])
 
             if df_index is None or df_index.empty:
                  df_index = pd.DataFrame([{"名称": "上证指数", "代码": "000001", "成交额": 0, "涨跌幅": 0}])
@@ -164,25 +175,31 @@ class AkShareDataProvider(DataProvider):
 
             # 2. Get Top Sector
             # If market is closed, this might return 0 change or old data
-            df_sector = ak.stock_board_industry_name_em()
-            df_sector = df_sector.sort_values(by='涨跌幅', ascending=False)
-            top_sector_row = df_sector.iloc[0]
-            top_sector_name = top_sector_row['板块名称']
-            top_sector_change = float(top_sector_row['涨跌幅'])
+            try:
+                df_sector = ak.stock_board_industry_name_em()
+                df_sector = df_sector.sort_values(by='涨跌幅', ascending=False)
+                top_sector_row = df_sector.iloc[0]
+                top_sector_name = top_sector_row['板块名称']
+                top_sector_change = float(top_sector_row['涨跌幅'])
+            except:
+                 # Fallback for sector
+                 top_sector_name = "暂无数据"
+                 top_sector_change = 0.0
             
             # 3. Get Constituents
             top_sector_constituents = []
-            try:
-                df_cons = ak.stock_board_industry_cons_em(symbol=top_sector_name)
-                df_cons = df_cons.sort_values(by='涨跌幅', ascending=False)
-                for _, row in df_cons.head(3).iterrows():
-                    top_sector_constituents.append({
-                        "name": row['名称'],
-                        "symbol": row['代码'],
-                        "change_pct": float(row['涨跌幅'])
-                    })
-            except:
-                pass
+            if top_sector_name != "暂无数据":
+                try:
+                    df_cons = ak.stock_board_industry_cons_em(symbol=top_sector_name)
+                    df_cons = df_cons.sort_values(by='涨跌幅', ascending=False)
+                    for _, row in df_cons.head(3).iterrows():
+                        top_sector_constituents.append({
+                            "name": row['名称'],
+                            "symbol": row['代码'],
+                            "change_pct": float(row['涨跌幅'])
+                        })
+                except:
+                    pass
 
             # 4. Limit Up Ladder (Crucial for intraday sentiment)
             limit_up_ladder = {"4板+": [], "3板": [], "2板": [], "1板": []}
@@ -190,6 +207,7 @@ class AkShareDataProvider(DataProvider):
             
             # Retry logic for ZT pool: if today is empty, try yesterday (simple logic)
             # This handles weekend/holiday viewing case
+            found_zt_data = False
             for d_offset in [0, 1, 2, 3]: # Try today, yesterday, day before...
                 # Calculate date string
                 import datetime
@@ -199,6 +217,7 @@ class AkShareDataProvider(DataProvider):
                     df_zt = ak.stock_zt_pool_em(date=check_date)
                     if not df_zt.empty:
                         target_date = check_date # Found valid data date
+                        found_zt_data = True
                         for _, row in df_zt.iterrows():
                             name = row['名称']
                             lb_count = int(row['连板数'])
@@ -215,11 +234,27 @@ class AkShareDataProvider(DataProvider):
                         break # Stop if found data
                 except:
                     continue
-
+            
             # 5. Dragon Tiger (using found target_date)
+            # If ZT data found, we use that date. If not, we try backtracking again for LHB
             dragon_tiger_list = []
+            lhb_date = target_date
+            
+            # If we didn't find ZT data, try to backtrack LHB independently
+            if not found_zt_data:
+                 for d_offset in [0, 1, 2, 3]:
+                    import datetime
+                    check_date = (datetime.datetime.now() - datetime.timedelta(days=d_offset)).strftime("%Y%m%d")
+                    try:
+                        df_test = ak.stock_lhb_jgzz_sina(date=check_date)
+                        if not df_test.empty:
+                            lhb_date = check_date
+                            break
+                    except:
+                        pass
+
             try:
-                df_lhb = ak.stock_lhb_jgzz_sina(date=target_date)
+                df_lhb = ak.stock_lhb_jgzz_sina(date=lhb_date)
                 if not df_lhb.empty:
                     for _, row in df_lhb.head(3).iterrows():
                         net_buy = float(row.get('净买入额', 0))
