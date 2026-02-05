@@ -146,6 +146,13 @@ class ThemeEmergenceRule(Rule):
         if len(history_window) >= 15:
             past_top_sector = history_window[-15].get('top_sector', "")
             if curr_top_sector != past_top_sector and curr_top_sector != "":
+                 # Enhance Description with Constituents
+                 constituents = current_data.get('top_sector_constituents', [])
+                 cons_str = ""
+                 if constituents:
+                     top_stock = constituents[0]
+                     cons_str = f". Leader: {top_stock['name']} (+{top_stock['change_pct']:.1f}%)"
+                 
                  return Event(
                     event_id=f"evt_{uuid.uuid4().hex[:8]}",
                     timestamp=time.time(),
@@ -155,9 +162,10 @@ class ThemeEmergenceRule(Rule):
                     data={
                         "metric": "new_leader",
                         "sector": curr_top_sector,
-                        "old_leader": past_top_sector
+                        "old_leader": past_top_sector,
+                        "constituents": constituents
                     },
-                    description=f"New market theme emerging: {curr_top_sector}."
+                    description=f"New theme emerging: {curr_top_sector}{cons_str}"
                 )
         return None
 
@@ -181,4 +189,3 @@ class ThemeExhaustionRule(Rule):
                 description="Leading theme shows signs of exhaustion."
             )
         return None
-
