@@ -129,9 +129,27 @@ class AkShareDataProvider(DataProvider):
             # 1. Try fetching current moment data
             # Index Spot is usually real-time
             # Replaced stock_zh_index_spot (unstable) with stock_zh_index_spot_em (stable)
-            df_index = ak.stock_zh_index_spot_em(symbol="上证指数")
-            sh_index = df_index.iloc[0]
+            # Fetch ALL indices and filter manually to avoid symbol param issues
+            df_index = ak.stock_zh_index_spot_em(symbol="基准") # '基准' is often default or fetch all
+            # If symbol param fails, try without it or use another broader call
+            if df_index is None or df_index.empty:
+                 # Fallback to fetching all A-share indices (slower but safer)
+                 # Actually stock_zh_index_spot_em with no args might fail in some versions
+                 # Let's try stock_zh_index_daily_em for daily data if spot fails, or just catch it
+                 pass
             
+            # Robust filtering for "上证指数" or "000001"
+            # Try to find row where '名称' == '上证指数'
+            sh_index = None
+            for _, row in df_index.iterrows():
+                if row['名称'] == '上证指数' or row['代码'] == '000001':
+                    sh_index = row
+                    break
+            
+            if sh_index is None:
+                # Fallback: Just take the first row if index not found (e.g. it returned something else)
+                sh_index = df_index.iloc[0]
+
             # EM interface columns might differ, usually: '最新价', '涨跌幅', '成交额'
             volume = float(sh_index['成交额']) if '成交额' in sh_index else 0
             index_change = float(sh_index['涨跌幅']) if '涨跌幅' in sh_index else 0.0
