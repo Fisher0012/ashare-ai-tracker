@@ -128,9 +128,11 @@ class AkShareDataProvider(DataProvider):
         try:
             # 1. Try fetching current moment data
             # Index Spot is usually real-time
-            df_index = ak.stock_zh_index_spot()
-            sh_index = df_index[df_index['代码'] == 'sh000001'].iloc[0]
+            # Replaced stock_zh_index_spot (unstable) with stock_zh_index_spot_em (stable)
+            df_index = ak.stock_zh_index_spot_em(symbol="上证指数")
+            sh_index = df_index.iloc[0]
             
+            # EM interface columns might differ, usually: '最新价', '涨跌幅', '成交额'
             volume = float(sh_index['成交额']) if '成交额' in sh_index else 0
             index_change = float(sh_index['涨跌幅']) if '涨跌幅' in sh_index else 0.0
 
